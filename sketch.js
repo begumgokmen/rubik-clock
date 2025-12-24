@@ -1,25 +1,35 @@
-// Rubik Clock (p5.js)
-// Hour   -> cube "solvedness" across 20 steps
-// Minute -> cube rotation
-// Second -> scanning highlight
-// Requirement: log minute() ONLY when minute changes (not more frequently)
+// Rubik Cube Clock — always a connected cube, no on-canvas text
+// Hour   -> "solvedness" (how many stickers match their face color)
+// Minute -> cube rotation (as a whole, still a cube)
+// Second -> moving scan highlight across stickers
+// Requirement: log minute() only when minute changes
 
 let lastLoggedMinute = null;
 
-// Sticker colors (classic Rubik palette)
 const PALETTE = {
-  W: [245, 245, 245], // white
-  Y: [245, 210, 60],  // yellow
-  R: [235, 70, 70],   // red
-  O: [245, 140, 50],  // orange
-  B: [70, 140, 235],  // blue
-  G: [80, 200, 120],  // green
-  K: [20, 22, 26]     // background-ish
+  W: [245, 245, 245],
+  Y: [245, 210, 60],
+  R: [235, 70, 70],
+  O: [245, 140, 50],
+  B: [70, 140, 235],
+  G: [80, 200, 120],
+  K: [14, 16, 20]
 };
 
-// Isometric basis vectors (shared by all faces)
-const ISO_X = { x: 1,   y: 0.5 };
-const ISO_Y = { x: -1,  y: 0.5 };
+// Three visible faces: Top (U), Front (F), Right (R)
+const FACE_KEYS = ["U", "F", "R"];
+
+const SOLVED = {
+  U: Array(9).fill("W"),
+  F: Array(9).fill("G"),
+  R: Array(9).fill("R")
+};
+
+let STATES = []; // 0..20 (scrambled -> solved)
+
+// --- Shared isometric basis (ALL faces use this; no drifting)
+const ISO_X = { x: 1, y: 0.5 };
+const ISO_Y = { x: -1, y: 0.5 };
 
 function iso(x, y) {
   return {
@@ -28,134 +38,98 @@ function iso(x, y) {
   };
 }
 
-// Three visible faces (U = top, F = front, R = right)
-const FACE_KEYS = ["U", "F", "R"];
-const SOLVED = {
-  U: Array(9).fill("W"),
-  F: Array(9).fill("G"),
-  R: Array(9).fill("R")
-};
-
-// We build 21 states: 0 = scrambled, 20 = solved
-let STATES = []; // each: {U:[9], F:[9], R:[9]}
-
 function setup() {
   const c = createCanvas(900, 650);
   c.parent("app");
   angleMode(RADIANS);
-  noStroke();
-
   STATES = buildStates20Moves();
 }
 
 function draw() {
-  background(PALETTE.K[0], PALETTE.K[1], PALETTE.K[2]);
+  background(...PALETTE.K);
 
-  // Time
-  const h24 = hour();     // 0..23
-  const m = minute();     // 0..59
-  const s = second();     // 0..59
+  const h24 = hour();   // 0..23
+  const m = minute();   // 0..59
+  const s = second();   // 0..59
 
-  // Requirement: log minute only when minute changes
+  // Log minute only when it changes
   if (lastLoggedMinute === null || m !== lastLoggedMinute) {
     console.log(m);
     lastLoggedMinute = m;
   }
 
-  // Map time -> visual parameters
-  const solvedness = map(h24 + m / 60, 0, 24, 0, 1, true); // 0..1 over day
-  const stepFloat = solvedness * 20;                      // 0..20
-  const stepA = floor(stepFloat);
-  const stepB = min(stepA + 1, 20);
-  const t = stepFloat - stepA;
+  // Hour -> solvedness 0..1
+  const solvedness = map(h24 + m / 60, 0, 24, 0, 1, true); // 0..1
+  const stepFloat = solvedness * 20;                       // 0..20
+  const a = floor(stepFloat);
+  const b = min(a + 1, 20);
+  const t = stepFloat - a;
 
-  const rot = map(m + s / 60, 0, 60, -PI * 0.85, PI * 1.15, false);
+  const state = lerpState(STATES[a], STATES[b], t);
 
-  // Seconds scan: 0..1 sweep
-  const scan = (s + (millis() % 1000) / 1000) / 60;
+  // Minute -> rotate the entire cube (still a cube)
+  const rot = map(m + s / 60, 0, 60, -PI / 10, PI / 10); // subtle, keeps cube readable
 
-  // Interpolated cube state between stepA and stepB
-  const state = lerpState(STATES[stepA], STATES[stepB], t);
+  // Second -> scan 0..1
+  const scan01 = (s + (millis() % 1000) / 1000) / 60;
 
-  // Layout
   push();
-  translate(width * 0.52, height * 0.52);
+  translate(width * 0.52, height * 0.56);
+  rotate(rot);
 
-  // Subtle shadow bloom
-  push();
-  noFill();
-  stroke(255, 255, 255, 25);
-  strokeWeight(10);
-  ellipse(0, 120, 520, 220);
-  pop();
+  // Draw a connected isometric cube (U, F, R share edges)
+  drawCube(state, scan01);
 
-  // Draw isometric cube-like net (3 faces) with minute rotation
-  drawIsometricCube(state, rot, scan);
-
-  pop();
-
-}
-
-function drawLegend(h24, m, s) {
-  push();
-  noStroke();
-  fill(233, 238, 245, 180);
-  textSize(14);
-  textAlign(LEFT, TOP);
-  text(
-    "Rubik Clock\n" +
-    "Hour: cube assembles through day\n" +
-    "Minute: cube rotation\n" +
-    "Second: scanning highlight",
-    20, 20
-  );
-
-  fill(233, 238, 245, 120);
-  textSize(12);
-  text(`Time now: ${nf(h24, 2)}:${nf(m, 2)}:${nf(s, 2)}`, 20, 100);
   pop();
 }
 
-function drawIsometricCube(state, rot, scan01) {
+// ---------------- Cube drawing (always connected) ----------------
+
+function drawCube(state, scan01) {
   const sticker = 34;
   const gap = 4;
-  const face = sticker * 3 + gap * 2;
+  const faceSize = sticker * 3 + gap * 2;
 
-  push();
-  rotate(rot * 0.25); // subtle minute rotation
+  // One cube origin; all faces positioned relative to it
+  // Front face origin at (0,0)
+  const oF = { x: 0, y: 0 };
+  // Right face shares the front's right edge: shift by +faceSize in "x" axis of the grid
+  const oR = iso(faceSize, 0);
+  // Top face shares the front's top edge: shift by -faceSize in "y" axis of the grid
+  const oU = iso(0, -faceSize);
 
-  // Origins for faces (they now TOUCH)
-  const front = iso(0, 0);
-  const right = iso(face, 0);
-  const top   = iso(0, -face);
+  // Depth ordering: top, right, then front
+  drawFace(state.U, oU.x, oU.y, sticker, gap, scan01, "U");
+  drawFace(state.R, oR.x, oR.y, sticker, gap, scan01, "R");
+  drawFace(state.F, oF.x, oF.y, sticker, gap, scan01, "F");
 
-  drawFace("F", state.F, front.x, front.y, sticker, gap, scan01);
-  drawFace("R", state.R, right.x, right.y, sticker, gap, scan01);
-  drawFace("U", state.U, top.x,   top.y,   sticker, gap, scan01);
-
-  pop();
+  // Outline the cube silhouette for readability
+  drawCubeOutline(faceSize);
 }
 
+function drawFace(stickers, ox, oy, sticker, gap, scan01, tag) {
+  stroke(10, 12, 16, 160);
+  strokeWeight(2);
 
-function drawFace(faceName, stickers, ox, oy, sticker, gap, scan01) {
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
       const idx = r * 3 + c;
-      const colorKey = stickers[idx];
-      const rgb = PALETTE[colorKey];
+      const key = stickers[idx];
+      const rgb = PALETTE[key];
 
       const x = c * (sticker + gap);
       const y = r * (sticker + gap);
       const p = iso(x, y);
 
-      // second scan glow
-      const d = abs((r + c) / 4 - scan01);
-      const glow = constrain(map(d, 0, 0.25, 1.4, 1.0), 1, 1.4);
+      // scan highlight (seconds): a band moving diagonally across each face
+      const u = (c + r * 0.85) / 3;             // 0..~1
+      const phase = tag === "U" ? 0.18 : tag === "R" ? 0.35 : 0.0;
+      const d = abs(u - ((scan01 + phase) % 1));
+      const glow = constrain(map(d, 0.0, 0.22, 1.35, 1.0), 1.0, 1.35);
 
-      fill(rgb[0] * glow, rgb[1] * glow, rgb[2] * glow);
-      stroke(20);
-      strokeWeight(2);
+      fill(rgb[0] * glow, rgb[1] * glow, rgb[2] * glow, 245);
 
+      // Draw a skewed sticker quad using the same iso basis
       const q0 = iso(0, 0);
       const q1 = iso(sticker, 0);
       const q2 = iso(sticker, sticker);
@@ -171,24 +145,53 @@ function drawFace(faceName, stickers, ox, oy, sticker, gap, scan01) {
   }
 }
 
-// Simple linear combination basis for a skewed plane
-function skewPoint(x, y, ax, ay, bx, by) {
-  return createVector(x * ax + y * bx, x * ay + y * by);
+function drawCubeOutline(faceSize) {
+  // Outline front face rect in iso-space plus the top/right extensions
+  noFill();
+  stroke(240, 245, 255, 70);
+  strokeWeight(2);
+
+  const F0 = iso(0, 0);
+  const F1 = iso(faceSize, 0);
+  const F2 = iso(faceSize, faceSize);
+  const F3 = iso(0, faceSize);
+
+  const U0 = iso(0, -faceSize);
+  const U1 = iso(faceSize, -faceSize);
+
+  const R0 = iso(faceSize, 0);
+  const R2 = iso(faceSize * 2, faceSize);
+
+  // front
+  beginShape();
+  vertex(F0.x, F0.y);
+  vertex(F1.x, F1.y);
+  vertex(F2.x, F2.y);
+  vertex(F3.x, F3.y);
+  endShape(CLOSE);
+
+  // top edge connection
+  line(U0.x, U0.y, U1.x, U1.y);
+  line(U0.x, U0.y, F0.x, F0.y);
+  line(U1.x, U1.y, F1.x, F1.y);
+
+  // right edge connection
+  line(R0.x, R0.y, R2.x, R2.y);
+  line(R0.x, R0.y, F1.x, F1.y);
+  line(R2.x, R2.y, F2.x, F2.y);
 }
 
-// Build states: scrambled -> solved in 20 "moves"
+// ---------------- States: “20 moves or fewer” metaphor ----------------
+
 function buildStates20Moves() {
-  // Start from solved, create a "scrambled" visible-face state by shuffling
-  // Then define 20 deterministic partial unshuffles back to solved.
-  // This is a visual analogy to 20-move solving (God’s number).
   const solved = deepCopyState(SOLVED);
 
+  // Create a deterministic "scrambled" state for visible stickers
   const scrambled = deepCopyState(SOLVED);
-  // Scramble by permuting visible stickers
+
   const all = [];
   for (const f of FACE_KEYS) for (const v of scrambled[f]) all.push(v);
 
-  // Deterministic shuffle (seedless but consistent): a fixed permutation
   const perm = fixedPermutation(all.length);
   const shuffled = perm.map(i => all[i]);
 
@@ -197,34 +200,27 @@ function buildStates20Moves() {
     scrambled[f] = scrambled[f].map(() => shuffled[k++]);
   }
 
-  // Now create 21 states: gradually restore stickers to solved positions.
-  // Each step "locks" more stickers into their solved face color.
+  // Create 21 states from scrambled -> solved by progressively “locking” stickers
+  const order = correctionOrder(); // 27 entries
+
   const states = [];
   for (let step = 0; step <= 20; step++) {
-    const p = step / 20; // 0..1
+    const p = step / 20;
     const st = deepCopyState(scrambled);
 
-    // Number of stickers corrected at this step (0..27)
-    const totalVisible = 27;
-    const corrected = floor(p * totalVisible);
-
-    // Deterministic correction order: center first, then edges, then corners, face by face
-    const order = correctionOrder();
-
+    const corrected = floor(p * 27);
     for (let i = 0; i < corrected; i++) {
       const { face, idx } = order[i];
       st[face][idx] = solved[face][idx];
     }
-
     states.push(st);
   }
   return states;
 }
 
 function correctionOrder() {
-  // 27 entries: 9 per face, deterministic order emphasizing "assembling"
-  // indices in a 3x3: [0..8]
-  const priority = [4, 1, 3, 5, 7, 0, 2, 6, 8]; // center, edges, corners
+  // Center -> edges -> corners per face
+  const priority = [4, 1, 3, 5, 7, 0, 2, 6, 8];
   const out = [];
   for (const face of FACE_KEYS) {
     for (const idx of priority) out.push({ face, idx });
@@ -233,8 +229,7 @@ function correctionOrder() {
 }
 
 function fixedPermutation(n) {
-  // A fixed, reproducible permutation without randomness
-  // Uses a simple modular arithmetic shuffle.
+  // deterministic permutation
   const arr = [...Array(n).keys()];
   const out = new Array(n);
   let j = 0;
@@ -247,23 +242,15 @@ function fixedPermutation(n) {
 }
 
 function deepCopyState(st) {
-  return {
-    U: st.U.slice(),
-    F: st.F.slice(),
-    R: st.R.slice()
-  };
+  return { U: st.U.slice(), F: st.F.slice(), R: st.R.slice() };
 }
 
 function lerpState(a, b, t) {
-  // For discrete sticker colors, interpolate by choosing a or b based on t threshold.
-  // This avoids muddy blending that hurts legibility.
+  // keep colors crisp: choose a or b (no muddy blends)
   const pick = (va, vb) => (t < 0.5 ? va : vb);
-
   const out = { U: [], F: [], R: [] };
   for (const f of FACE_KEYS) {
-    for (let i = 0; i < 9; i++) {
-      out[f][i] = pick(a[f][i], b[f][i]);
-    }
+    for (let i = 0; i < 9; i++) out[f][i] = pick(a[f][i], b[f][i]);
   }
   return out;
 }
