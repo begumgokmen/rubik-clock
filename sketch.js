@@ -17,6 +17,17 @@ const PALETTE = {
   K: [20, 22, 26]     // background-ish
 };
 
+// Isometric basis vectors (shared by all faces)
+const ISO_X = { x: 1,   y: 0.5 };
+const ISO_Y = { x: -1,  y: 0.5 };
+
+function iso(x, y) {
+  return {
+    x: x * ISO_X.x + y * ISO_Y.x,
+    y: x * ISO_X.y + y * ISO_Y.y
+  };
+}
+
 // Three visible faces (U = top, F = front, R = right)
 const FACE_KEYS = ["U", "F", "R"];
 const SOLVED = {
@@ -83,8 +94,6 @@ function draw() {
 
   pop();
 
-  // Minimal legend (optional but helps viewers)
-  drawLegend(h24, m, s);
 }
 
 function drawLegend(h24, m, s) {
@@ -108,129 +117,56 @@ function drawLegend(h24, m, s) {
 }
 
 function drawIsometricCube(state, rot, scan01) {
-  // Geometry
   const sticker = 34;
   const gap = 4;
-  const faceSize = sticker * 3 + gap * 2;
+  const face = sticker * 3 + gap * 2;
 
-  // Isometric-ish vectors
-  // We'll fake 3D by skewing faces into parallelograms.
-  // Minute rotation modulates the skew direction, so the cube appears to rotate.
-  const skewX = cos(rot) * 0.65;
-  const skewY = sin(rot) * 0.22;
-
-  // Face planes:
-  // Front face: mostly straight
-  // Right face: skewed to the right
-  // Top face: skewed upward
-  const origin = createVector(-faceSize * 0.20, faceSize * 0.10);
-
-  // Draw order: top -> right -> front for a plausible overlap
-  drawFaceParallelogram("U", state.U, origin.x + 40 * skewX, origin.y - 160, sticker, gap, {
-    ax: 1.0, ay: 0.0,
-    bx: skewX * 0.9, by: -0.75,
-    scan01, faceTag: "U"
-  });
-
-  drawFaceParallelogram("R", state.R, origin.x + 190, origin.y - 50, sticker, gap, {
-    ax: 0.95, ay: 0.05,
-    bx: 0.62 + skewX * 0.45, by: 0.22 + skewY * 0.55,
-    scan01, faceTag: "R"
-  });
-
-  drawFaceParallelogram("F", state.F, origin.x, origin.y, sticker, gap, {
-    ax: 1.0, ay: 0.0,
-    bx: 0.05 + skewX * 0.15, by: 1.0,
-    scan01, faceTag: "F"
-  });
-
-  // Cube frame outline (helps legibility)
   push();
-  noFill();
-  stroke(233, 238, 245, 55);
-  strokeWeight(2);
+  rotate(rot * 0.25); // subtle minute rotation
 
-  // Front outline
-  rect(origin.x - 2, origin.y - 2, faceSize + 4, faceSize + 4, 10);
+  // Origins for faces (they now TOUCH)
+  const front = iso(0, 0);
+  const right = iso(face, 0);
+  const top   = iso(0, -face);
+
+  drawFace("F", state.F, front.x, front.y, sticker, gap, scan01);
+  drawFace("R", state.R, right.x, right.y, sticker, gap, scan01);
+  drawFace("U", state.U, top.x,   top.y,   sticker, gap, scan01);
 
   pop();
 }
 
-function drawFaceParallelogram(faceName, stickers, ox, oy, sticker, gap, geom) {
-  const { ax, ay, bx, by, scan01, faceTag } = geom;
 
-  // Frame
-  push();
-  noFill();
-  stroke(233, 238, 245, 70);
-  strokeWeight(2);
-  const faceW = sticker * 3 + gap * 2;
-  // Approx outline using corners in skew space
-  const p0 = skewPoint(0, 0, ax, ay, bx, by);
-  const p1 = skewPoint(faceW, 0, ax, ay, bx, by);
-  const p2 = skewPoint(faceW, faceW, ax, ay, bx, by);
-  const p3 = skewPoint(0, faceW, ax, ay, bx, by);
-  beginShape();
-  vertex(ox + p0.x, oy + p0.y);
-  vertex(ox + p1.x, oy + p1.y);
-  vertex(ox + p2.x, oy + p2.y);
-  vertex(ox + p3.x, oy + p3.y);
-  endShape(CLOSE);
-  pop();
-
-  // Stickers
+function drawFace(faceName, stickers, ox, oy, sticker, gap, scan01) {
   for (let r = 0; r < 3; r++) {
     for (let c = 0; c < 3; c++) {
       const idx = r * 3 + c;
-      const key = stickers[idx];
+      const colorKey = stickers[idx];
+      const rgb = PALETTE[colorKey];
 
       const x = c * (sticker + gap);
       const y = r * (sticker + gap);
+      const p = iso(x, y);
 
-      const p = skewPoint(x, y, ax, ay, bx, by);
+      // second scan glow
+      const d = abs((r + c) / 4 - scan01);
+      const glow = constrain(map(d, 0, 0.25, 1.4, 1.0), 1, 1.4);
 
-      // Seconds scan highlight: a soft band that moves across each face
-      const u = (c + r * 0.35) / 3; // 0..~1
-      const scanDist = abs(u - scan01);
-      const glow = constrain(map(scanDist, 0.0, 0.22, 1.0, 0.0), 0, 1);
-
-      // Face-specific scan phase so they don't look identical
-      const facePhase = faceTag === "U" ? 0.10 : (faceTag === "R" ? 0.22 : 0.00);
-      const glow2 = constrain(glow + 0.25 * sin(TAU * (scan01 + facePhase)), 0, 1);
-
-      // Base color
-      const rgb = PALETTE[key];
-      const br = 1.0 + 0.35 * glow2;
-
-      push();
-      noStroke();
-      fill(rgb[0] * br, rgb[1] * br, rgb[2] * br, 240);
-
-      const stickerW = sticker;
-      const q0 = skewPoint(0, 0, ax, ay, bx, by);
-      const q1 = skewPoint(stickerW, 0, ax, ay, bx, by);
-      const q2 = skewPoint(stickerW, stickerW, ax, ay, bx, by);
-      const q3 = skewPoint(0, stickerW, ax, ay, bx, by);
-
-      beginShape();
-      vertex(ox + p.x + q0.x, oy + p.y + q0.y);
-      vertex(ox + p.x + q1.x, oy + p.y + q1.y);
-      vertex(ox + p.x + q2.x, oy + p.y + q2.y);
-      vertex(ox + p.x + q3.x, oy + p.y + q3.y);
-      endShape(CLOSE);
-
-      // Sticker border
-      noFill();
-      stroke(0, 0, 0, 110);
+      fill(rgb[0] * glow, rgb[1] * glow, rgb[2] * glow);
+      stroke(20);
       strokeWeight(2);
+
+      const q0 = iso(0, 0);
+      const q1 = iso(sticker, 0);
+      const q2 = iso(sticker, sticker);
+      const q3 = iso(0, sticker);
+
       beginShape();
       vertex(ox + p.x + q0.x, oy + p.y + q0.y);
       vertex(ox + p.x + q1.x, oy + p.y + q1.y);
       vertex(ox + p.x + q2.x, oy + p.y + q2.y);
       vertex(ox + p.x + q3.x, oy + p.y + q3.y);
       endShape(CLOSE);
-
-      pop();
     }
   }
 }
