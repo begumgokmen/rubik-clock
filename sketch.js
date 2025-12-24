@@ -91,4 +91,3 @@ class Runner {
     rect(this.x - 5, this.y + 10, 10, 15);
   }
 }
-s
