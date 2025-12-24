@@ -1,93 +1,140 @@
-let secondsRunner;
-let minutesRunner;
-let hourRunners = [];
-
+let platforms = [];
+let secondsRunner, minutesRunner, hourRunner;
 let lastMinute = -1;
 let hueIndex = 0;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   colorMode(HSL, 360, 100, 100);
-  noStroke();
   frameRate(60);
 
-  secondsRunner = new Runner(0, height * 0.2, 8, 0);
-  minutesRunner = new Runner(0, height * 0.5, 3, 0);
+  // Layout levels
+  let levelSpacing = height / 4;
+  createLevel(1, levelSpacing);
+  createLevel(2, levelSpacing * 2);
+  createLevel(3, levelSpacing * 3);
 
-  // Create 3 hour runners
-  for (let i = 0; i < 3; i++) {
-    hourRunners.push(new Runner(i * 150, height * 0.8, 1.2, 0));
-  }
+  // Runners
+  secondsRunner = new Runner(0, levelSpacing - 40, 6, levelSpacing, 'seconds');
+  minutesRunner = new Runner(0, levelSpacing * 2 - 40, 3, levelSpacing * 2, 'minutes');
+  hourRunner = new Runner(0, levelSpacing * 3 - 40, 1.5, levelSpacing * 3, 'hours');
 }
 
 function draw() {
   background(0);
+  drawTracks();
 
-  drawTrack(height * 0.2);
-  drawTrack(height * 0.5);
-  drawTrack(height * 0.8);
+  for (let p of platforms) p.display();
 
   secondsRunner.update();
-  secondsRunner.display();
-
   minutesRunner.update();
+  hourRunner.update();
+
+  secondsRunner.display();
   minutesRunner.display();
+  hourRunner.display();
 
-  for (let r of hourRunners) {
-    r.update();
-    r.display();
-  }
-
-  // Check every new minute
-  let currentMinute = minute();
-  if (currentMinute !== lastMinute) {
-    lastMinute = currentMinute;
+  // Update time & colors each new minute
+  let m = minute();
+  if (m !== lastMinute) {
+    lastMinute = m;
     hueIndex = (hueIndex + 1) % 24;
     minutesRunner.cycleColor(hueIndex);
-    hourRunners.forEach(r => r.cycleColor(hueIndex));
-    console.log("Minute:", currentMinute);
+    hourRunner.cycleColor(hueIndex);
+    console.log("Minute:", m);
   }
 
-  // Check if all hour runners match color → new hour tick
-  let refColor = hourRunners[0].hue;
-  let allSame = hourRunners.every(r => r.hue === refColor);
-
-  if (allSame) {
+  if (secondsRunner.looped && minutesRunner.looped && hourRunner.looped) {
     push();
     fill(0, 0, 100);
-    textAlign(CENTER, CENTER);
-    textSize(32);
-    text("NEW HOUR!", width / 2, 50);
+    textSize(24);
+    textAlign(CENTER);
+    text("Hour Complete", width / 2, 50);
     pop();
   }
 }
 
-function drawTrack(y) {
-  fill(30);
-  rect(0, y + 10, width, 5);
+function drawTracks() {
+  stroke(40);
+  strokeWeight(5);
+  noFill();
+  for (let i = 1; i <= 3; i++) {
+    let y = i * height / 4;
+    line(0, y, width, y);
+  }
+}
+
+function createLevel(level, baseY) {
+  // Platforms (x, y, w, h)
+  platforms.push(new Platform(0, baseY - 20, 200, 10));
+  platforms.push(new Platform(300, baseY - 60, 150, 10));
+  platforms.push(new Platform(550, baseY - 40, 150, 10));
+  platforms.push(new Platform(800, baseY - 80, 150, 10));
 }
 
 class Runner {
-  constructor(x, y, speed, hueIndex) {
+  constructor(x, y, speed, groundY, type) {
     this.x = x;
     this.y = y;
     this.speed = speed;
-    this.hue = map(hueIndex, 0, 24, 0, 360);
+    this.velY = 0;
+    this.groundY = groundY;
+    this.size = 20;
+    this.hue = 0;
+    this.type = type;
+    this.looped = false;
   }
 
   update() {
+    this.looped = false;
     this.x += this.speed;
-    if (this.x > width) this.x = 0;
-  }
 
-  cycleColor(hueIndex) {
-    this.hue = map(hueIndex % 24, 0, 24, 0, 360);
+    // Gravity
+    this.velY += 0.6;
+    this.y += this.velY;
+
+    // Collision
+    for (let p of platforms) {
+      if (this.x + this.size > p.x && this.x < p.x + p.w) {
+        if (this.y + this.size >= p.y && this.y + this.size <= p.y + p.h) {
+          this.y = p.y - this.size;
+          this.velY = -9; // jump!
+        }
+      }
+    }
+
+    // Loop around
+    if (this.x > width) {
+      this.x = 0;
+      this.looped = true;
+    }
+
+    // Fall off screen
+    if (this.y > height) {
+      this.y = this.groundY - 40;
+      this.velY = 0;
+    }
   }
 
   display() {
     fill(this.hue, 80, 60);
-    ellipse(this.x, this.y, 20);
-    // Optional: add a rectangle below as body
-    rect(this.x - 5, this.y + 10, 10, 15);
+    ellipse(this.x, this.y, this.size);
+  }
+
+  cycleColor(hueStep) {
+    this.hue = map(hueStep % 24, 0, 24, 0, 360);
+  }
+}
+class Platform {
+  constructor(x, y, w, h) {
+    this.x = x;
+    this.y = y;
+    this.w = w;
+    this.h = h;
+  }
+
+  display() {
+    fill(255);
+    rect(this.x, this.y, this.w, this.h);
   }
 }
