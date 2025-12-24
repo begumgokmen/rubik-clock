@@ -46,9 +46,9 @@ function initCubeColors() {
       cubeColors[x][y] = [];
       for (let z = 0; z < 3; z++) {
         cubeColors[x][y][z] = {
-          x: color(255, 0, 0),    // red (right)
-          y: color(0, 255, 0),    // green (top)
-          z: color(255, 255, 255) // white (front)
+          x: color(255, 0, 0),     // red (right)
+          y: color(0, 255, 0),     // green (top)
+          z: color(255, 255, 255), // white (front)
         };
       }
     }
@@ -73,39 +73,38 @@ function updateCubeColors() {
   }
 }
 
-function drawCubelet(colors, size) {
+function drawCubelet(c, size) {
+  let s = size / 2;
+
+  // Outline cube
   push();
   stroke(30);
   noFill();
-  box(size); // Draw the cubelet outline
+  box(size);
   pop();
-
-  let s = size / 2;
 
   // FRONT FACE (Z+)
   push();
-  translate(0, 0, s + 0.1);
-  fill(colors.z);
-  noStroke();
-  plane(size - 2, size - 2);
+  translate(0, 0, s + 0.5);
+  fill(c.z); noStroke();
+  plane(size - 4, size - 4);
   pop();
 
   // TOP FACE (Y-)
   push();
-  translate(0, -s - 0.1, 0);
+  translate(0, -s - 0.5, 0);
   rotateX(HALF_PI);
-  fill(colors.y);
-  noStroke();
-  plane(size - 2, size - 2);
+  fill(c.y); noStroke();
+  plane(size - 4, size - 4);
   pop();
 
   // RIGHT FACE (X+)
   push();
-  translate(s + 0.1, 0, 0);
+  translate(s + 0.5, 0, 0);
   rotateY(HALF_PI);
-  fill(colors.x);
-  noStroke();
-  plane(size - 2, size - 2);
+  fill(c.x); noStroke();
+  plane(size - 4, size - 4);
   pop();
 }
+
 
